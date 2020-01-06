@@ -113,7 +113,9 @@ object SQLConf {
    * Returns the active config object within the current scope. If there is an active SparkSession,
    * the proper SQLConf associated with the thread's active session is used. If it's called from
    * tasks in the executor side, a SQLConf will be created from job local properties, which are set
-   * and propagated from the driver side.
+   * and propagated from the driver side, unless a `SQLConf` has been set in the scope by
+   * `withExistingConf` as done for propagating SQLConf for operations performed on RDDs created
+   * from DataFrames.
    *
    * The way this works is a little bit convoluted, due to the fact that config was added initially
    * only for physical plans (and as a result not in sql/catalyst module).
@@ -127,10 +129,16 @@ object SQLConf {
    */
   def get: SQLConf = {
     if (TaskContext.get != null) {
-      new ReadOnlySQLConf(TaskContext.get())
+      val conf = existingConf.get()
+      if (conf != null) {
+        conf
+      } else {
+        new ReadOnlySQLConf(TaskContext.get())
+      }
     } else {
       val isSchedulerEventLoopThread = SparkContext.getActive
-        .map(_.dagScheduler.eventProcessLoop.eventThread)
+        .flatMap { sc => Option(sc.dagScheduler) }
+        .map(_.eventProcessLoop.eventThread)
         .exists(_.getId == Thread.currentThread().getId)
       if (isSchedulerEventLoopThread) {
         // DAGScheduler event loop thread does not have an active SparkSession, the `confGetter`
@@ -300,7 +308,7 @@ object SQLConf {
     .booleanConf
     .createWithDefault(false)
 
-  val FILE_COMRESSION_FACTOR = buildConf("spark.sql.sources.fileCompressionFactor")
+  val FILE_COMPRESSION_FACTOR = buildConf("spark.sql.sources.fileCompressionFactor")
     .internal()
     .doc("When estimating the output data size of a table scan, multiply the file size with this " +
       "factor as the estimated data size, in case the data is compressed in the file and lead to" +
@@ -1291,6 +1299,15 @@ object SQLConf {
       .booleanConf
       .createWithDefault(true)
 
+  val USE_CONF_ON_RDD_OPERATION =
+    buildConf("spark.sql.legacy.rdd.applyConf")
+      .internal()
+      .doc("When false, SQL configurations are disregarded when operations on a RDD derived from" +
+        " a dataframe are executed. This is the (buggy) behavior up to 2.4.4. This config is " +
+        "deprecated and it will be removed in 3.0.0.")
+      .booleanConf
+      .createWithDefault(true)
+
   val REPLACE_EXCEPT_WITH_FILTER = buildConf("spark.sql.optimizer.replaceExceptWithFilter")
     .internal()
     .doc("When true, the apply function of the rule verifies whether the right node of the" +
@@ -1728,7 +1745,7 @@ class SQLConf extends Serializable with Logging {
 
   def escapedStringLiterals: Boolean = getConf(ESCAPED_STRING_LITERALS)
 
-  def fileCompressionFactor: Double = getConf(FILE_COMRESSION_FACTOR)
+  def fileCompressionFactor: Double = getConf(FILE_COMPRESSION_FACTOR)
 
   def stringRedactionPattern: Option[Regex] = getConf(SQL_STRING_REDACTION_PATTERN)
 

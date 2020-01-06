@@ -417,7 +417,11 @@ class DataFrameReader(OptionUtils):
         :param maxMalformedLogPerPartition: this parameter is no longer used since Spark 2.2.0.
                                             If specified, it is ignored.
         :param mode: allows a mode for dealing with corrupt records during parsing. If None is
-                     set, it uses the default value, ``PERMISSIVE``.
+                     set, it uses the default value, ``PERMISSIVE``. Note that Spark tries to
+                     parse only required columns in CSV under column pruning. Therefore, corrupt
+                     records can be different based on required set of fields. This behavior can
+                     be controlled by ``spark.sql.csv.parser.columnPruning.enabled``
+                     (enabled by default).
 
                 * ``PERMISSIVE`` : when it meets a corrupted record, puts the malformed string \
                   into a field configured by ``columnNameOfCorruptRecord``, and sets other \
@@ -522,7 +526,8 @@ class DataFrameReader(OptionUtils):
 
         :param url: a JDBC URL of the form ``jdbc:subprotocol:subname``
         :param table: the name of the table
-        :param column: the name of an integer column that will be used for partitioning;
+        :param column: the name of a column of numeric, date, or timestamp type
+                       that will be used for partitioning;
                        if this parameter is specified, then ``numPartitions``, ``lowerBound``
                        (inclusive), and ``upperBound`` (exclusive) will form partition strides
                        for generated WHERE clause expressions used to split the column
@@ -721,7 +726,7 @@ class DataFrameWriter(OptionUtils):
         :param partitionBy: names of partitioning columns
         :param options: all other string options
 
-        >>> df.write.mode('append').parquet(os.path.join(tempfile.mkdtemp(), 'data'))
+        >>> df.write.mode("append").save(os.path.join(tempfile.mkdtemp(), 'data'))
         """
         self.mode(mode).options(**options)
         if partitionBy is not None:
